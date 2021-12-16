@@ -11,6 +11,10 @@ set -o nounset
 # Выход при ошибках вызываемых команд.
 set -o errexit
 
+if [ "${DEBUG:-}" != "" ]; then
+  set -x
+fi
+
 ##
 # Коды ошибок
 #
@@ -27,30 +31,19 @@ errUnknownError=254
 tmpDir=${TMPDIR:-${TEMP:-${TMP:-/tmp}}}
 # Файл блокировки
 lockFile="${tmpDir}/reconfi.lock"
+# Папка очередей.
+queuesDir=""
 
 #SCRIPT_DIR=$(realpath $(dirname ${0}))
 #
 #systemctl='sudo systemctl --force'
-zypper_install='sudo zypper install --auto-agree-with-licenses --no-confirm'
-#zypper_remove='sudo zypper remove --no-confirm'
+zypper_install='sudo zypper install --auto-agree-with-licenses'
+zypper_remove='sudo zypper remove'
 
 # Признак того, что нужен повторный вход.
 isReloginNeeded=0
 # Признак того, что нужна перезагрузка.
 isRebootNeeded=0
-
-##
-# API: Проверяет работу sudo.
-#
-api__check_sudo() {
-  echo 'Проверяем правильность настройки sudo'
-  if [ "$(sudo whoami)" = "root" ]; then
-    echo "Порядок, можно продолжать."
-  else
-    echo "sudo настройка неправильно, дальнейшая работа невозможна."
-    exit "${errInvalidSystemConfiguration}"
-  fi
-}
 
 ##
 # API: Группа включает в себя указанного пользователя.
@@ -64,16 +57,7 @@ api__group_contains() {
   userName="${2:-}"
   [ "${userName}" != '' ] || error__fatal "${errApiArgumentMissing}" "[group contains] Не указано имя пользователя."
 
-  print_check "В группу ${groupName} входит пользователь ${userName}"
-  if id -nG "${userName}" | grep "${groupName}" >/dev/null; then
-    print_checked
-  else
-    print_check_failed
-    confirm 'Добавить пользователя в группу?'
-    su -c "usermod --append --groups=${groupName} ${userName}"
-    print_fixed
-    isReloginNeeded=1
-  fi
+  queues__enqueue groups "cmd__group_contains ${groupName} ${userName}"
 }
 
 ##
@@ -83,21 +67,16 @@ api__group_contains() {
 # @param $2 Название.
 #
 api__opensuse_repo() {
+  if [ "${ID}" != "opensuse" ] && [ "${ID}" != "opensuse-leap" ]; then
+    return
+  fi
+
   uri="${1:-}"
   [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
   name="${1:-}"
   [ "${name}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указано имя репозитория."
 
-  print_check "Репозиторий \"${uri}\" подключён"
-  if sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
-    print_checked
-  else
-    print_check_failed
-    confirm 'Подключить?'
-    sudo zypper removerepo "${name}"
-    sudo zypper addrepo --name="${name}" --refresh "${uri}" "${name}"
-    sudo zypper --gpg-auto-import-keys refresh
-  fi
+  queues__enqueue repositories "cmd__opensuse_repo \"${uri}\" \"${name}\""
 }
 
 ##
@@ -105,18 +84,18 @@ api__opensuse_repo() {
 #
 # @param $1 Список пакетов.
 #
-api__packages() {
+api__packages_install() {
   for pkg in "$@"; do
-    print_check "${pkg} установлен"
-    if is_package_installed "${pkg}"; then
-      print_checked
-    else
-      print_check_failed
-      confirm 'Установить?'
-      ${zypper_install} "${pkg}"
-    fi
+    queues__enqueue install "cmd__package_install ${pkg}"
   done
 }
+
+api__packages_remove() {
+  for pkg in "$@"; do
+    queues__enqueue remove "cmd__package_remove ${pkg}"
+  done
+}
+
 ##
 # API: Действия с текущей сессией.
 #
@@ -135,7 +114,7 @@ api__session() {
         echo "Нажмите Enter для выхода."
         read -r
         # TODO Добавить поддержку других сред.
-        qdbus org.kde.ksmserver /KSMServer logout 0 0 0
+        qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
       fi
       ;;
 
@@ -143,6 +122,20 @@ api__session() {
       error__fatal "${errApiInvalidValue}" "[session] Неизвестная команда ${action}."
       ;;
   esac
+}
+
+api__ini_set() {
+  path="${1}"
+  key=$2
+  value="${3}"
+
+  if [ -f "$path" ]; then
+    if grep -E "^${key}=" "${path}" >/dev/null; then
+      sudo sed -i "/^${key}=.*/c\\${key}=${value}" "${path}"
+    else
+      echo "${key}=${value}" | sudo tee -a "${path}"
+    fi
+  fi
 }
 
 ##
@@ -157,6 +150,70 @@ api__variables() {
   value="${2:-}"
   [ "${value}" != '' ] || error__fatal "${errApiArgumentMissing}" "[variables] Не указано значение для ${name}."
   export "${name}=${value}"
+}
+
+cmd__group_contains() {
+  groupName=$1
+  userName=$2
+  if id -nG "${userName}" | grep "${groupName}" >/dev/null; then
+    print__ok "Пользователь ${userName} входит в группу ${groupName}."
+  else
+    print_check_failed
+    confirm 'Добавить пользователя в группу?'
+    su -c "usermod --append --groups=${groupName} ${userName}"
+    print_fixed
+    isReloginNeeded=1
+  fi
+}
+
+cmd__opensuse_repo() {
+  uri=$1
+  name=$2
+
+  if sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
+    print__ok "Репозиторий \"${uri}\" подключён."
+  else
+    print__check_failed "Репозиторий \"${uri}\" не подключён."
+    if confirm 'Подключить?'; then
+      #sudo zypper removerepo "${name}"
+      sudo zypper addrepo --name="${name}" --refresh "${uri}" "${name}"
+      sudo zypper --gpg-auto-import-keys refresh
+    fi
+  fi
+}
+
+cmd__package_install() {
+  pkg=$1
+  recipe="recipe__$(echo "${pkg}" | tr '-' '_')"
+  if type "${recipe}" 1>/dev/null 2>/dev/null; then
+    $recipe
+  else
+    if is_package_installed "${pkg}"; then
+      print__ok "${pkg} установлен."
+    else
+      print__check_failed "${pkg} не установлен."
+      if confirm 'Установить?'; then
+        ${zypper_install} "${pkg}"
+      fi
+    fi
+  fi
+
+  recipe_after="recipe__${pkg}_after"
+  if type "${recipe_after}" 1>/dev/null 2>/dev/null; then
+    $recipe_after
+  fi
+}
+
+cmd__package_remove() {
+  pkg="${1}"
+  if is_package_installed "${pkg}"; then
+    print__check_failed "Установлен лишний пакет ${pkg}"
+    if confirm 'Удалить?'; then
+      ${zypper_remove} "${pkg}"
+    fi
+  else
+    print__ok "${pkg} отсутствует."
+  fi
 }
 
 #function apply_patch
@@ -193,11 +250,14 @@ confirm() {
   question="${1}"
   shift
 
-  printf "%s [Y/n]: " "${question}"
+  printf "%s [Y/n/q]: " "${question}"
   read -r answer
   case ${answer} in
     '') ;;
     [YyДд]*) ;;
+    [NnНн]*)
+      return 1
+      ;;
     *)
       echo 'Сценарий прерван пользователем.'
       exit "${errCancelledByUser}"
@@ -221,6 +281,7 @@ error__fatal() {
 #
 handler__onError() {
   echo 'Выполнение сценария прервано из-за ошибки.'
+  queues__cleanup
   lock__removeLock
 }
 
@@ -228,6 +289,7 @@ handler__onError() {
 # Функция, вызываемая при нормальном завершении сценария.
 #
 handler__onExit() {
+  queues__cleanup
   lock__removeLock
 }
 
@@ -318,6 +380,42 @@ is_package_installed() {
 #}
 
 ##
+# Очищает папку очередей.
+#
+queues__cleanup() {
+  if [ "${queuesDir}" != "" ]; then
+    rm -rf "${queuesDir}"
+  fi
+}
+
+##
+# Добавляет команду в очередь.
+#
+# @param $1 Имя очереди.
+# @param $2 Команда.
+#
+queues__enqueue() {
+  queue="${1}"
+  command="${2}"
+
+  echo "${command}" >>"${queuesDir}/${queue}"
+}
+
+##
+# Выполняет очередь.
+#
+# @param $1 Имя очереди.
+#
+queues__run() {
+  queue="${queuesDir}/${1}"
+
+  if [ -f "${queue}" ]; then
+    # shellcheck disable=SC1090
+    . "${queue}"
+  fi
+}
+
+##
 # Выводит описание проверки.
 #
 # @param $1 Описание проверки.
@@ -329,15 +427,17 @@ print_check() {
 ##
 # Выводит сообщение о провалившейся проверке.
 #
-print_check_failed() {
-  echo "❌ нет"
+print__check_failed() {
+  echo " ❌ ${1}"
 }
 
 ##
 # Выводит сообщение об успешной проверке.
 #
-print_checked() {
-  echo "✔ да"
+# @param $1 Описание.
+#
+print__ok() {
+  echo " ✔ ${1}"
 }
 
 ##
@@ -346,27 +446,6 @@ print_checked() {
 print_fixed() {
   echo "✔ Исправлено."
 }
-
-#function print_note
-#{
-#    echo
-#    echo "(i) ${1}"
-#    echo
-#}
-#
-#function remove_packages
-#{
-#    for pkg in "$@"; do
-#        print_check "${pkg} отсутствует"
-#        if is_package_installed ${pkg}; then
-#            print_check_failed
-#            confirm 'Удалить?'
-#            ${zypper_remove} ${pkg}
-#        else
-#            print_checked
-#        fi
-#    done
-#}
 
 ####################################################################################################
 
@@ -397,6 +476,11 @@ echo "————————————————————————�
 echo
 
 confirm 'Начать проверку и настройку системы?'
+
+# shellcheck disable=SC1091
+. /etc/os-release
+
+queuesDir="$(mktemp --tmpdir -d RCFI.XXXX)"
 
 # shellcheck disable=SC1090
 . "${confFile}"
@@ -432,3 +516,16 @@ confirm 'Начать проверку и настройку системы?'
 #    echo -e "\n127.0.0.1\t$(hostname)" | sudo tee --append /etc/hosts >/dev/null
 #    print_fixed
 #fi
+
+echo 'Для настройки системы нужны права суперпользователя.'
+if [ "$(sudo whoami)" = "root" ]; then
+  echo "Права получены."
+else
+  echo "Не удалось получить права суперпользователя."
+  exit "${errInvalidSystemConfiguration}"
+fi
+
+queues__run groups
+queues__run repositories
+queues__run remove
+queues__run install
