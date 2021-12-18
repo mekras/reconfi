@@ -11,20 +11,26 @@ set -o nounset
 # Выход при ошибках вызываемых команд.
 set -o errexit
 
+# TODO Заменить на -v
+if [ "${VERBOSE:-}" != "" ]; then
+  set -o verbose
+fi
+
+# TODO Заменить на -vv
 if [ "${DEBUG:-}" != "" ]; then
-  set -x
+  set -o xtrace
 fi
 
 ##
-# Коды ошибок
-#
+## Коды ошибок
+##
 #errNoError=0
 errCancelledByUser=201
 errInvalidUsage=202
 errParallelRun=203
 errInvalidSystemConfiguration=204
 errApiArgumentMissing=240
-errApiInvalidValue=241
+#errApiInvalidValue=241
 errUnknownError=254
 
 # Путь к папке временных файлов.
@@ -34,8 +40,6 @@ lockFile="${tmpDir}/reconfi.lock"
 # Папка очередей.
 queuesDir=""
 
-#SCRIPT_DIR=$(realpath $(dirname ${0}))
-#
 #systemctl='sudo systemctl --force'
 zypper_install='sudo zypper install --auto-agree-with-licenses'
 zypper_remove='sudo zypper remove'
@@ -97,31 +101,25 @@ api__packages_remove() {
 }
 
 ##
-# API: Действия с текущей сессией.
+# Запросить завершение сеанса.
 #
-# @param $1 Действие.
+api__session_request_restart() {
+  isReloginNeeded=1
+}
+
+##
+# Действия с текущей сессией.
 #
-api__session() {
-  action="${1:-}"
-  [ "${action}" != '' ] || error__fatal "${errApiArgumentMissing}" "[session] Не указано действие."
-
-  case "${action}" in
-    'restart-if-needed')
-      if [ ${isReloginNeeded} -eq 1 ]; then
-        echo
-        echo "Для применения сделанных изменений надо заново войти в систему."
-        echo
-        echo "Нажмите Enter для выхода."
-        read -r
-        # TODO Добавить поддержку других сред.
-        qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
-      fi
-      ;;
-
-    *)
-      error__fatal "${errApiInvalidValue}" "[session] Неизвестная команда ${action}."
-      ;;
-  esac
+session__check_for_actions() {
+  if [ ${isReloginNeeded} -eq 1 ]; then
+    echo
+    echo 'Для применения сделанных изменений надо заново войти в систему.'
+    echo
+    if confirm 'Завершить сеанс?'; then
+      # TODO Добавить поддержку других сред.
+      qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
+    fi
+  fi
 }
 
 api__ini_set() {
@@ -162,7 +160,7 @@ cmd__group_contains() {
     confirm 'Добавить пользователя в группу?'
     su -c "usermod --append --groups=${groupName} ${userName}"
     print_fixed
-    isReloginNeeded=1
+    api__session_request_restart
   fi
 }
 
@@ -182,26 +180,38 @@ cmd__opensuse_repo() {
   fi
 }
 
+##
+# Устанавливает пакет, если он не установлен.
+#
+# @param $1 Имя пакета.
+#
+# Изменить поведение можно с помощью «рецептов» — функций с определённым именем:
+# - recipe__$1_installed — проверяет, установлен ли пакет (код возврата 0 — установлен);
+# - recipe__$1_before_install — вызывается перед установкой;
+# - recipe__$1_install — устанавливает пакет;
+# - recipe__$1_after_install — вызывается после установки.
+# - recipe__$1_configure — настраивает пакет, вызывается всегда;
 cmd__package_install() {
-  pkg=$1
-  recipe="recipe__$(echo "${pkg}" | tr '-' '_')"
-  if type "${recipe}" 1>/dev/null 2>/dev/null; then
-    $recipe
-  else
-    if is_package_installed "${pkg}"; then
-      print__ok "${pkg} установлен."
-    else
-      print__check_failed "${pkg} не установлен."
-      if confirm 'Установить?'; then
-        ${zypper_install} "${pkg}"
-      fi
-    fi
+  pkg="${1}"
+
+  if is_package_installed "${pkg}"; then
+    print__ok "${pkg} установлен."
+    recipe__run "${pkg}" configure || true
+    return
   fi
 
-  recipe_after="recipe__${pkg}_after"
-  if type "${recipe_after}" 1>/dev/null 2>/dev/null; then
-    $recipe_after
+  print__check_failed "${pkg} не установлен."
+  if ! confirm 'Установить?'; then
+    return
   fi
+
+  recipe__run "${pkg}" before_install || true
+
+  if ! recipe__run "${pkg}" install; then
+    ${zypper_install} "${pkg}"
+  fi
+
+  recipe__run "${pkg}" after_install || true
 }
 
 cmd__package_remove() {
@@ -238,6 +248,23 @@ checkNeededActions() {
     printf "Нажмите Enter для перезагрузки."
     read -r
     sudo reboot
+  fi
+}
+
+##
+# Выполняет рецепт.
+#
+# @param $1 Имя субъекта (например, пакета) рецепта.
+# @param $2 Вариант рецепта (installed, before_install…).
+recipe__run() {
+  subject="${1}"
+  type="${2}"
+  recipe="recipe__$(echo "${subject}" | tr '-' '_')_${type}"
+
+  if type "${recipe}" 1>/dev/null 2>/dev/null; then
+    $recipe
+  else
+    false
   fi
 }
 
@@ -347,7 +374,10 @@ lock__ensureNoLock() {
 #}
 
 is_package_installed() {
-  rpm -q --whatprovides "${1:-}" >/dev/null
+  pkg="${1:-}"
+  if ! recipe__run "${pkg}" installed; then
+    rpm -q --whatprovides "${pkg}" >/dev/null
+  fi
 }
 
 #function install_file
@@ -448,6 +478,17 @@ print_fixed() {
 }
 
 ####################################################################################################
+# Рецепты
+####################################################################################################
+
+recipe__snapd_after_install() {
+  api__session_request_restart
+  sudo systemctl enable snapd.apparmor.service
+  sudo systemctl enable snapd
+  sudo systemctl start snapd
+}
+
+####################################################################################################
 
 confFile="${1:-}"
 if [ "${confFile}" = '' ]; then
@@ -529,3 +570,4 @@ queues__run groups
 queues__run repositories
 queues__run remove
 queues__run install
+session__check_for_actions
