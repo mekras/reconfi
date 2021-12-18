@@ -49,13 +49,23 @@ isReloginNeeded=0
 # Признак того, что нужна перезагрузка.
 isRebootNeeded=0
 
+####################################################################################################
+## Утверждения.
 ##
-# API: Группа включает в себя указанного пользователя.
+## Эти функции предназначены для использования в файлах конфигурации системы. В будущем возможно
+## преобразование файлов в форматах YAML, tree и т. п. в файлы shell, вызывающие эти функции.
+##
+## Сами функции не выполняют настройку системы, они только добавляют нужные действия в очереди
+## (см. queues_*).
+####################################################################################################
+
+##
+# Группа включает указанного пользователя.
 #
 # @param $1 Имя группы.
 # @param $2 Имя пользователя.
 #
-api__group_contains() {
+assert__group_contains() {
   groupName="${1:-}"
   [ "${groupName}" != '' ] || error__fatal "${errApiArgumentMissing}" "[group contains] Не указано имя группы."
   userName="${2:-}"
@@ -65,69 +75,50 @@ api__group_contains() {
 }
 
 ##
-# API: [openSUSE] Источник ПО должен быть подключён.
+# Файл существует.
 #
-# @param $1 URL.
-# @param $2 Название.
+# @param $1 Путь к файлу.
 #
-api__opensuse_repo() {
-  if [ "${ID}" != "opensuse" ] && [ "${ID}" != "opensuse-leap" ]; then
+assert__file_exists() {
+  path="${1:-}"
+  [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[file exists] Не указан путь к файлу."
+  if [ -f "${path}" ]; then
+    print__ok "Файл ${path} существует."
     return
   fi
 
-  uri="${1:-}"
-  [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
-  name="${1:-}"
-  [ "${name}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указано имя репозитория."
+  print__check_failed "Файл ${path} существует."
+  api__confirm 'Создать?' || return
 
-  queues__enqueue repositories "cmd__opensuse_repo \"${uri}\" \"${name}\""
-}
-
-##
-# API: Указанные пакеты должны быть установлены.
-#
-# @param $1 Список пакетов.
-#
-api__packages_install() {
-  for pkg in "$@"; do
-    queues__enqueue install "cmd__package_install ${pkg}"
-  done
-}
-
-api__packages_remove() {
-  for pkg in "$@"; do
-    queues__enqueue remove "cmd__package_remove ${pkg}"
-  done
-}
-
-##
-# Запросить завершение сеанса.
-#
-api__session_request_restart() {
-  isReloginNeeded=1
-}
-
-##
-# Действия с текущей сессией.
-#
-session__check_for_actions() {
-  if [ ${isReloginNeeded} -eq 1 ]; then
-    echo
-    echo 'Для применения сделанных изменений надо заново войти в систему.'
-    echo
-    if confirm 'Завершить сеанс?'; then
-      # TODO Добавить поддержку других сред.
-      qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
-    fi
+  if echo "${path}" | grep -E "^${HOME}" >/dev/null; then
+    touch "${path}"
+  else
+    sudo touch "${path}"
   fi
 }
 
-api__ini_set() {
-  path="${1}"
-  key=$2
-  value="${3}"
+##
+# Параметр в файле .ini установлен.
+#
+# @param $1 Путь к файлу.
+# @param $2 Раздел (используйте точку «.» для корневого раздела).
+# @param $2 Ключ.
+# @param $3 Значение.
+#
+assert__ini_set() {
+  path="${1:-}"
+  [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан путь к файлу."
+  section="${2:-}"
+  [ "${section}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан раздел."
+  key="${3:-}"
+  [ "${key}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан ключ."
+  value="${4:-}"
+  [ "${value}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указано значение."
 
-  if [ -f "$path" ]; then
+  # TODO Вынести в cmd_*
+  # FIXME section не поддерживается.
+
+  if [ -f "${path}" ]; then
     if grep -E "^${key}=" "${path}" >/dev/null; then
       sudo sed -i "/^${key}=.*/c\\${key}=${value}" "${path}"
     else
@@ -137,18 +128,109 @@ api__ini_set() {
 }
 
 ##
-# API: Установить значение переменной окружения.
+# [openSUSE] Источник ПО подключён.
 #
-# @param $1 Имя переменной.
-# @param $2 Значение переменной.
+# @param $1 URL.
+# @param $2 Название.
 #
-api__variables() {
+assert__opensuse_repo_connected() {
+  if [ "${ID}" != "opensuse" ] && [ "${ID}" != "opensuse-leap" ]; then
+    return
+  fi
+
+  uri="${1:-}"
+  [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
   name="${1:-}"
-  [ "${name}" != '' ] || error__fatal "${errApiArgumentMissing}" "[variables] Не указано имя переменной."
-  value="${2:-}"
-  [ "${value}" != '' ] || error__fatal "${errApiArgumentMissing}" "[variables] Не указано значение для ${name}."
-  export "${name}=${value}"
+  [ "${name}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указано имя репозитория."
+
+  queues__enqueue repositories "cmd__opensuse_repo_add \"${uri}\" \"${name}\""
 }
+
+##
+# [openSUSE] Источник ПО не подключён.
+#
+# @param $1 URL.
+#
+assert__opensuse_repo_disconnected() {
+  if [ "${ID}" != "opensuse" ] && [ "${ID}" != "opensuse-leap" ]; then
+    return
+  fi
+
+  uri="${1:-}"
+  [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
+
+  queues__enqueue repositories "cmd__opensuse_repo_remove \"${uri}\""
+}
+
+##
+# Указанные пакеты установлены.
+#
+# @param $1 Список пакетов.
+#
+assert__packages_installed() {
+  for pkg in "$@"; do
+    queues__enqueue install "cmd__package_install ${pkg}"
+  done
+}
+
+##
+# Указанные пакеты отсутствуют.
+#
+# @param $1 Список пакетов.
+#
+assert__packages_not_installed() {
+  for pkg in "$@"; do
+    queues__enqueue remove "cmd__package_remove ${pkg}"
+  done
+}
+
+####################################################################################################
+## API
+##
+## Функции, которые могут быть вызваны из файла конфигурации системы.
+####################################################################################################
+
+##
+# Запрашивает у пользователя подтверждение действия.
+#
+# @param $1 Вопрос, который надо задать пользователю.
+#
+api__confirm() {
+  question="${1}"
+  shift
+
+  printf "%s [Y/n/q]: " "${question}"
+  read -r answer
+  case ${answer} in
+    '')
+      true
+      ;;
+    [YyДд]*)
+      true
+      ;;
+    [NnНн]*)
+      false
+      ;;
+    *)
+      echo 'Сценарий прерван пользователем.'
+      exit "${errCancelledByUser}"
+      ;;
+  esac
+}
+
+##
+# Требуется завершение сеанса.
+#
+api__session_restart_required() {
+  isReloginNeeded=1
+}
+
+####################################################################################################
+## Команды
+##
+## Эти функции предназначены для постановки их в очереди из функций api_* для последующего пакетного
+## выполнения. Именно эти функции должны вносить изменения в систему.
+####################################################################################################
 
 cmd__group_contains() {
   groupName=$1
@@ -157,26 +239,51 @@ cmd__group_contains() {
     print__ok "Пользователь ${userName} входит в группу ${groupName}."
   else
     print_check_failed
-    confirm 'Добавить пользователя в группу?'
+    api__confirm 'Добавить пользователя в группу?'
     su -c "usermod --append --groups=${groupName} ${userName}"
     print_fixed
-    api__session_request_restart
+    api__session_restart_required
   fi
 }
 
-cmd__opensuse_repo() {
-  uri=$1
-  name=$2
+##
+# [openSUSE] Источник ПО подключён.
+#
+# @param $1 URL.
+# @param $2 Название.
+#
+cmd__opensuse_repo_add() {
+  uri="${1}"
+  name="${2}"
 
   if sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
     print__ok "Репозиторий \"${uri}\" подключён."
   else
     print__check_failed "Репозиторий \"${uri}\" не подключён."
-    if confirm 'Подключить?'; then
+    if api__confirm 'Подключить?'; then
       #sudo zypper removerepo "${name}"
       sudo zypper addrepo --name="${name}" --refresh "${uri}" "${name}"
       sudo zypper --gpg-auto-import-keys refresh
     fi
+  fi
+}
+
+##
+# [openSUSE] Источник ПО не подключён.
+#
+# @param $1 URL.
+#
+cmd__opensuse_repo_remove() {
+  uri="${1}"
+
+  if ! sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
+    print__ok "Репозиторий \"${uri}\" не подключён."
+    return
+  fi
+
+  print__check_failed "Репозиторий \"${uri}\" подключён."
+  if api__confirm 'Удалить?'; then
+    sudo zypper removerepo "${uri}"
   fi
 }
 
@@ -201,7 +308,7 @@ cmd__package_install() {
   fi
 
   print__check_failed "${pkg} не установлен."
-  if ! confirm 'Установить?'; then
+  if ! api__confirm 'Установить?'; then
     return
   fi
 
@@ -218,7 +325,7 @@ cmd__package_remove() {
   pkg="${1}"
   if is_package_installed "${pkg}"; then
     print__check_failed "Установлен лишний пакет ${pkg}"
-    if confirm 'Удалить?'; then
+    if api__confirm 'Удалить?'; then
       ${zypper_remove} "${pkg}"
     fi
   else
@@ -231,7 +338,7 @@ cmd__package_remove() {
 #    patchFile=${SCRIPT_DIR}/${1}
 #    message=${2}
 #
-#    confirm "Применить патч ${1}?"
+#    api__confirm "Применить патч ${1}?"
 #    print_check "${message}"
 #    if cd / && sudo patch --ignore-whitespace --forward --reject-file=- --batch --strip=1 < ${patchFile} >/dev/null; then
 #        print_fixed
@@ -269,27 +376,18 @@ recipe__run() {
 }
 
 ##
-# Запрашивает у пользователя подтверждение действия.
+# Действия с текущей сессией.
 #
-# @param $1 Вопрос, который надо задать пользователю.
-#
-confirm() {
-  question="${1}"
-  shift
-
-  printf "%s [Y/n/q]: " "${question}"
-  read -r answer
-  case ${answer} in
-    '') ;;
-    [YyДд]*) ;;
-    [NnНн]*)
-      return 1
-      ;;
-    *)
-      echo 'Сценарий прерван пользователем.'
-      exit "${errCancelledByUser}"
-      ;;
-  esac
+session__check_for_actions() {
+  if [ ${isReloginNeeded} -eq 1 ]; then
+    echo
+    echo 'Для применения сделанных изменений надо заново войти в систему.'
+    echo
+    if api__confirm 'Завершить сеанс?'; then
+      # TODO Добавить поддержку других сред.
+      qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
+    fi
+  fi
 }
 
 ##
@@ -357,7 +455,7 @@ lock__ensureNoLock() {
 #            print_checked
 #        else
 #            print_check_failed
-#            confirm 'Включить?'
+#            api__confirm 'Включить?'
 #            ${systemctl} enable ${service}
 #            print_fixed
 #        fi
@@ -367,7 +465,7 @@ lock__ensureNoLock() {
 #            print_checked
 #        else
 #            print_check_failed
-#            confirm 'Запустить?'
+#            api__confirm 'Запустить?'
 #            ${systemctl} start ${service}
 #        fi
 #    done
@@ -390,7 +488,7 @@ is_package_installed() {
 #        print_checked
 #    else
 #        print_check_failed
-#        confirm "Установить файл ${filename}?"
+#        api__confirm "Установить файл ${filename}?"
 #        sudo cp ${SCRIPT_DIR}/${filename} /${filename}
 #    fi
 #}
@@ -403,7 +501,7 @@ is_package_installed() {
 #            print_checked
 #        else
 #            print_check_failed
-#            confirm 'Установить?'
+#            api__confirm 'Установить?'
 #            sudo npm -g install ${pkg}
 #        fi
 #    done
@@ -482,7 +580,7 @@ print_fixed() {
 ####################################################################################################
 
 recipe__snapd_after_install() {
-  api__session_request_restart
+  api__session_restart_required
   sudo systemctl enable snapd.apparmor.service
   sudo systemctl enable snapd
   sudo systemctl start snapd
@@ -516,7 +614,7 @@ echo "reconfi — установка ПО и настройка системы"
 echo "——————————————————————————————————————————"
 echo
 
-confirm 'Начать проверку и настройку системы?'
+api__confirm 'Начать проверку и настройку системы?'
 
 # shellcheck disable=SC1091
 . /etc/os-release
@@ -542,7 +640,7 @@ queuesDir="$(mktemp --tmpdir -d RCFI.XXXX)"
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Изменить имя хоста?'
+#    api__confirm 'Изменить имя хоста?'
 #    sudo hostnamectl set-hostname ${USER}
 #    print_fixed
 #    isRebootNeeded=1
@@ -553,7 +651,7 @@ queuesDir="$(mktemp --tmpdir -d RCFI.XXXX)"
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Вписать?'
+#    api__confirm 'Вписать?'
 #    echo -e "\n127.0.0.1\t$(hostname)" | sudo tee --append /etc/hosts >/dev/null
 #    print_fixed
 #fi

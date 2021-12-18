@@ -1,8 +1,12 @@
-api__group_contains wheel "$USER"
+assert__group_contains wheel "$USER"
 
-api__opensuse_repo "http://download.nvidia.com/opensuse/leap/$VERSION/" "nvidia"
+if lspci | grep -i nvidia /dev/null; then
+  assert__opensuse_repo_connected "http://download.nvidia.com/opensuse/leap/$VERSION/"
+else
+  assert__opensuse_repo_disconnected "http://download.nvidia.com/opensuse/leap/$VERSION/"
+fi
 
-api__packages_remove \
+assert__packages_not_installed \
   akregator \
   arphic-bsmi00lp-fonts \
   arphic-fonts \
@@ -25,29 +29,29 @@ api__packages_remove \
 ##
 ## Основная система
 ##
-api__opensuse_repo "http://download.opensuse.org/distribution/leap/$VERSION/repo/oss/" "Основной репозиторий"
-api__opensuse_repo "http://download.opensuse.org/update/leap/$VERSION/oss" "Основной репозиторий обновлений"
-api__opensuse_repo "http://download.opensuse.org/debug/distribution/leap/$VERSION/repo/oss" "Debug Repository"
-api__opensuse_repo "http://download.opensuse.org/debug/update/leap/$VERSION/oss/" "Update Repository (Debug)"
-api__opensuse_repo "http://download.opensuse.org/source/distribution/leap/$VERSION/repo/oss/" "Source Repository"
+assert__opensuse_repo_connected "http://download.opensuse.org/distribution/leap/$VERSION/repo/oss/" "Основной репозиторий"
+assert__opensuse_repo_connected "http://download.opensuse.org/update/leap/$VERSION/oss" "Основной репозиторий обновлений"
+assert__opensuse_repo_connected "http://download.opensuse.org/debug/distribution/leap/$VERSION/repo/oss" "Debug Repository"
+assert__opensuse_repo_connected "http://download.opensuse.org/debug/update/leap/$VERSION/oss/" "Update Repository (Debug)"
+assert__opensuse_repo_connected "http://download.opensuse.org/source/distribution/leap/$VERSION/repo/oss/" "Source Repository"
 
-api__opensuse_repo "http://download.opensuse.org/distribution/leap/$VERSION/repo/non-oss/" "Репозиторий Non-OSS"
-api__opensuse_repo "http://download.opensuse.org/update/leap/$VERSION/non-oss/" "Репозиторий обновлений (Non-Oss)"
-api__opensuse_repo "http://download.opensuse.org/debug/distribution/leap/$VERSION/repo/non-oss/" "Debug Repository (Non-OSS)"
-api__opensuse_repo "http://download.opensuse.org/debug/update/leap/$VERSION/non-oss/" "Update Repository (Debug, Non-OSS)"
-api__opensuse_repo "http://download.opensuse.org/source/distribution/leap/$VERSION/repo/non-oss/" "Source Repository (Non-OSS)"
+assert__opensuse_repo_connected "http://download.opensuse.org/distribution/leap/$VERSION/repo/non-oss/" "Репозиторий Non-OSS"
+assert__opensuse_repo_connected "http://download.opensuse.org/update/leap/$VERSION/non-oss/" "Репозиторий обновлений (Non-Oss)"
+assert__opensuse_repo_connected "http://download.opensuse.org/debug/distribution/leap/$VERSION/repo/non-oss/" "Debug Repository (Non-OSS)"
+assert__opensuse_repo_connected "http://download.opensuse.org/debug/update/leap/$VERSION/non-oss/" "Update Repository (Debug, Non-OSS)"
+assert__opensuse_repo_connected "http://download.opensuse.org/source/distribution/leap/$VERSION/repo/non-oss/" "Source Repository (Non-OSS)"
 
-api__opensuse_repo "https://download.opensuse.org/repositories/system:/snappy/openSUSE_Leap_$VERSION" "snappy"
-api__opensuse_repo "https://download.opensuse.org/repositories/filesystems/openSUSE_Leap_$VERSION/" "filesystems"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/system:/snappy/openSUSE_Leap_$VERSION" "snappy"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/filesystems/openSUSE_Leap_$VERSION/" "filesystems"
 
-api__opensuse_repo "http://download.opensuse.org/repositories/mozilla/openSUSE_Leap_$VERSION/" "mozilla"
-api__opensuse_repo "https://linux.teamviewer.com/yum/stable/main/binary-x86_64/" "TeamViewer"
+assert__opensuse_repo_connected "http://download.opensuse.org/repositories/mozilla/openSUSE_Leap_$VERSION/" "mozilla"
+assert__opensuse_repo_connected "https://linux.teamviewer.com/yum/stable/main/binary-x86_64/" "TeamViewer"
 
-api__opensuse_repo "https://download.opensuse.org/repositories/devel:/languages:/php/openSUSE_Leap_$VERSION/" "devel:languages:php"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/devel:/languages:/php/openSUSE_Leap_$VERSION/" "devel:languages:php"
 
-api__opensuse_repo "https://download.opensuse.org/repositories/home:/Sauerland:/hardware/openSUSE_Leap_$VERSION/" "home:Sauerland:hardware"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/home:/Sauerland:/hardware/openSUSE_Leap_$VERSION/" "home:Sauerland:hardware"
 
-api__packages_install \
+assert__packages_installed \
   git \
   etckeeper \
   cmake \
@@ -105,28 +109,28 @@ api__packages_install \
   zip
 
 # Настройка клавиатуры.
-api__ini_set "$HOME/.config/kxkbrc" DisplayNames '\xd0\x90\xd0\x9d\xd0\x93,\xd0\xa0\xd0\xa3\xd0\xa1'
-api__ini_set "$HOME/.config/kxkbrc" Options 'terminate:ctrl_alt_bksp,lv3:ralt_switch,misc:typo,grp:caps_toggle'
-api__ini_set "$HOME/.config/kxkbrc" Model pc101
-api__ini_set "$HOME/.config/kxkbrc" ResetOldOptions true
+assert__ini_set "$HOME/.config/kxkbrc" . DisplayNames '\xd0\x90\xd0\x9d\xd0\x93,\xd0\xa0\xd0\xa3\xd0\xa1'
+assert__ini_set "$HOME/.config/kxkbrc" . Options 'terminate:ctrl_alt_bksp,lv3:ralt_switch,misc:typo,grp:caps_toggle'
+assert__ini_set "$HOME/.config/kxkbrc" . Model pc101
+assert__ini_set "$HOME/.config/kxkbrc" . ResetOldOptions true
 
-api__ini_set "$HOME/.config/kglobalshortcutsrc" '{24bfa1fc-6c9f-4ed3-ba8b-b49386aa962e}' 'Alt+`,none,Launch Konsole'
-api__ini_set "$HOME/.config/kglobalshortcutsrc" 'Lock Session' 'Meta+L\\t\\tScreensaver,Meta+L\\tCtrl+Alt+L\\tScreensaver,Заблокировать сеанс'
-api__ini_set "$HOME/.config/kglobalshortcutsrc" 'Walk Through Windows of Current Application' ',,На одно окно вперёд текущего приложения'
+assert__ini_set "$HOME/.config/kglobalshortcutsrc" . '{24bfa1fc-6c9f-4ed3-ba8b-b49386aa962e}' 'Alt+`,none,Launch Konsole'
+assert__ini_set "$HOME/.config/kglobalshortcutsrc" . 'Lock Session' 'Meta+L\\t\\tScreensaver,Meta+L\\tCtrl+Alt+L\\tScreensaver,Заблокировать сеанс'
+assert__ini_set "$HOME/.config/kglobalshortcutsrc" . 'Walk Through Windows of Current Application' ',,На одно окно вперёд текущего приложения'
 
 ##
 ## Утилиты
 ##
-api__opensuse_repo "https://mega.nz/linux/MEGAsync/openSUSE_Leap_$VERSION/" "MEGAsync"
-api__opensuse_repo "http://repo.yandex.ru/yandex-disk/rpm/stable/x86_64/" "yandex-disk"
-api__packages_install \
+assert__opensuse_repo_connected "https://mega.nz/linux/MEGAsync/openSUSE_Leap_$VERSION/" "MEGAsync"
+assert__opensuse_repo_connected "http://repo.yandex.ru/yandex-disk/rpm/stable/x86_64/" "yandex-disk"
+assert__packages_installed \
   megasync \
   yandex-disk
 
 ##
 ## Интернет
 ##
-api__packages_install \
+assert__packages_installed \
   chromium \
   firefox \
   MozillaThunderbird \
@@ -136,19 +140,19 @@ api__packages_install \
 ##
 ## Teams
 ##
-api__opensuse_repo "https://packages.microsoft.com/yumrepos/ms-teams" "teams"
-api__packages_remove teams-insiders
-api__packages_install teams
+assert__opensuse_repo_connected "https://packages.microsoft.com/yumrepos/ms-teams" "teams"
+assert__packages_not_installed teams-insiders
+assert__packages_installed teams
 
-api__opensuse_repo "https://repo.skype.com/rpm/stable/" "skype"
-api__packages_install skypeforlinux
+assert__opensuse_repo_connected "https://repo.skype.com/rpm/stable/" "skype"
+assert__packages_installed skypeforlinux
 
 #print_check 'etckeeper включен и настроен'
 #if [ -d /etc/.git ]; then
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Настроить?'
+#    api__confirm 'Настроить?'
 #    sudo git config --global core.editor mcedit
 #    sudo git config --global user.name root
 #    sudo git config --global user.email "root@$(hostname)"
@@ -165,7 +169,7 @@ api__packages_install skypeforlinux
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Увеличить?'
+#    api__confirm 'Увеличить?'
 #    sudo cp -f etc/security/limits.d/${filename} /etc/security/limits.d/${filename}
 #    print_fixed
 #    isRebootNeeded=1
@@ -194,7 +198,7 @@ api__packages_install skypeforlinux
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Изменить права доступа?'
+#    api__confirm 'Изменить права доступа?'
 #    sudo chmod 4755 "${filename}"
 #    print_fixed
 #fi
@@ -203,10 +207,10 @@ api__packages_install skypeforlinux
 #    print_checked
 #else
 #    print_check_failed
-#    confirm 'Добавить?'
+#    api__confirm 'Добавить?'
 #    sudo usermod --append --groups=vboxusers "${USER}"
 #    print_fixed
-#    api__session_request_restart
+#    assert__session_request_restart
 #fi
 #
 #checkNeededActions
@@ -218,7 +222,7 @@ api__packages_install skypeforlinux
 #    # Для JetBrains Toolbox
 #    # https://github.com/AppImage/AppImageKit/wiki/FUSE
 #    print_check_failed
-#    confirm 'Разрешить?'
+#    api__confirm 'Разрешить?'
 #    sudo chmod a+x /usr/bin/fusermount && sudo chown root /usr/bin/fusermount && sudo chmod u+s /usr/bin/fusermount
 #fi
 
@@ -231,12 +235,12 @@ api__packages_install skypeforlinux
 # Единый список пакетов с указанием зависимостей.
 
 ## Obsidian.md
-api__packages_install obsidian
+assert__packages_installed obsidian
 
 ##
 ## Разработка
 ##
-api__packages_install \
+assert__packages_installed \
   composer \
   docker \
   docker-compose \
@@ -280,9 +284,9 @@ api__packages_install \
 ##
 ## Мультимедиа
 ##
-api__opensuse_repo "http://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Leap_$VERSION/" "Packman Repository"
-api__opensuse_repo "http://opensuse-guide.org/repo/openSUSE_Leap_$VERSION/" "dvd"
-api__packages_install \
+assert__opensuse_repo_connected "http://ftp.gwdg.de/pub/linux/misc/packman/suse/openSUSE_Leap_$VERSION/" "Packman Repository"
+assert__opensuse_repo_connected "http://opensuse-guide.org/repo/openSUSE_Leap_$VERSION/" "dvd"
+assert__packages_installed \
   amarok \
   audacity \
   digikam \
@@ -293,22 +297,22 @@ api__packages_install \
 ##
 ## Деньги
 ##
-api__packages_install \
+assert__packages_installed \
   tradingview
 
 ##
 ## Игры
 ##
-api__opensuse_repo "https://download.opensuse.org/repositories/games/openSUSE_Leap_$VERSION/" "games"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/games/openSUSE_Leap_$VERSION/" "games"
 
-api__packages_install \
+assert__packages_installed \
   steam \
   freeciv-qt
 
 ##
 ## 3D
 ##
-api__packages_install \
+assert__packages_installed \
   blender
 
 ##
@@ -349,12 +353,12 @@ recipe__fish_after_install() {
 
   if [ "$(getent passwd "${USER}" | cut -d: -f7)" != "$(command -v fish)" ]; then
     sudo usermod -s "$(command -v fish)" "${USER}"
-    api__session_request_restart
+    assert__session_request_restart
   fi
 
   if [ "$(getent passwd root | cut -d: -f7)" != "$(command -v fish)" ]; then
     sudo usermod -s "$(command -v fish)" root
-    api__session_request_restart
+    assert__session_request_restart
   fi
 
   echo "set COMPOSER_MEMORY_LIMIT -1
@@ -439,7 +443,7 @@ recipe__obsidian_install() {
 
   if [ ! -f "$appDir/logo.png" ]; then
     print__check_failed "Нет логотипа Obsidian."
-    if confirm 'Скачать?'; then
+    if api__confirm 'Скачать?'; then
       wget -O "$appDir/logo.png" https://newreleases.io/icon/github/obsidianmd
     fi
   fi
@@ -458,6 +462,20 @@ recipe__obsidian_install() {
     "$desktopFile"
 }
 
+recipe__php_redis_installed() {
+  pecl info redis >/dev/null 2>/dev/null
+}
+
+recipe__php_redis_install() {
+  sudo pecl install redis
+}
+
+recipe__php_redis_configure() {
+  iniFile="$(php-config --ini-dir)/redis.ini"
+  assert__file_exists "${iniFile}"
+  assert__ini_set "${iniFile}" . extension 'redis.so'
+}
+
 recipe__tradingview_installed() {
   snap info tradingview | grep installed >/dev/null
 }
@@ -468,7 +486,7 @@ recipe__tradingview_install() {
 
 recipe__wireshark_after_install() {
   sudo usermod -a -G wireshark "$USER"
-  api__session_request_restart
+  assert__session_request_restart
 }
 
 recipe__yandex_browser_beta_install() {
