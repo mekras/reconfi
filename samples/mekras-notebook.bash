@@ -44,7 +44,6 @@ assert__opensuse_repo_connected "http://download.opensuse.org/source/distributio
 assert__opensuse_repo_connected "https://download.opensuse.org/repositories/system:/snappy/openSUSE_Leap_$VERSION" "snappy"
 assert__opensuse_repo_connected "https://download.opensuse.org/repositories/filesystems/openSUSE_Leap_$VERSION/" "filesystems"
 
-assert__opensuse_repo_connected "http://download.opensuse.org/repositories/mozilla/openSUSE_Leap_$VERSION/" "mozilla"
 assert__opensuse_repo_connected "https://linux.teamviewer.com/yum/stable/main/binary-x86_64/" "TeamViewer"
 
 assert__opensuse_repo_connected "https://download.opensuse.org/repositories/devel:/languages:/php/openSUSE_Leap_$VERSION/" "devel:languages:php"
@@ -124,12 +123,14 @@ assert__ini_set "$HOME/.config/kglobalshortcutsrc" . 'Walk Through Windows of Cu
 assert__opensuse_repo_connected "https://mega.nz/linux/MEGAsync/openSUSE_Leap_$VERSION/" "MEGAsync"
 assert__opensuse_repo_connected "http://repo.yandex.ru/yandex-disk/rpm/stable/x86_64/" "yandex-disk"
 assert__packages_installed \
+  flameshot \
   megasync \
   yandex-disk
 
 ##
 ## Интернет
 ##
+assert__opensuse_repo_connected "http://download.opensuse.org/repositories/mozilla/openSUSE_Leap_$VERSION/" "mozilla"
 assert__packages_installed \
   chromium \
   firefox \
