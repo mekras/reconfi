@@ -42,7 +42,7 @@ assert__opensuse_repo_connected "http://download.opensuse.org/debug/update/leap/
 assert__opensuse_repo_connected "http://download.opensuse.org/source/distribution/leap/$VERSION/repo/non-oss/" "Source Repository (Non-OSS)"
 
 assert__opensuse_repo_connected "https://download.opensuse.org/repositories/system:/snappy/openSUSE_Leap_$VERSION" "snappy"
-assert__opensuse_repo_connected "https://download.opensuse.org/repositories/filesystems/openSUSE_Leap_$VERSION/" "filesystems"
+assert__opensuse_repo_connected "https://download.opensuse.org/repositories/filesystems/$VERSION/" "filesystems"
 
 assert__opensuse_repo_connected "https://linux.teamviewer.com/yum/stable/main/binary-x86_64/" "TeamViewer"
 
@@ -148,6 +148,13 @@ assert__packages_installed teams
 assert__opensuse_repo_connected "https://repo.skype.com/rpm/stable/" "skype"
 assert__packages_installed skypeforlinux
 
+##
+## Zoom
+##
+# Zoom устанавливает ibus, который мне на фиг не нужен. Отключаем всё, что можно.
+assert__file_not_exists '/etc/xdg/autostart/ibus-autostart.desktop' reboot=recommend
+assert__file_not_exists '/etc/X11/xim.d/ibus' reboot=recommend
+
 #print_check 'etckeeper включен и настроен'
 #if [ -d /etc/.git ]; then
 #    print_checked
@@ -211,7 +218,7 @@ assert__packages_installed skypeforlinux
 #    api__confirm 'Добавить?'
 #    sudo usermod --append --groups=vboxusers "${USER}"
 #    print_fixed
-#    assert__session_request_restart
+#    api__session_exit_recommend
 #fi
 #
 #checkNeededActions
@@ -354,12 +361,12 @@ recipe__fish_after_install() {
 
   if [ "$(getent passwd "${USER}" | cut -d: -f7)" != "$(command -v fish)" ]; then
     sudo usermod -s "$(command -v fish)" "${USER}"
-    assert__session_request_restart
+    api__session_exit_recommend
   fi
 
   if [ "$(getent passwd root | cut -d: -f7)" != "$(command -v fish)" ]; then
     sudo usermod -s "$(command -v fish)" root
-    assert__session_request_restart
+    api__session_exit_recommend
   fi
 
   echo "set COMPOSER_MEMORY_LIMIT -1
@@ -487,7 +494,7 @@ recipe__tradingview_install() {
 
 recipe__wireshark_after_install() {
   sudo usermod -a -G wireshark "$USER"
-  assert__session_request_restart
+  api__session_exit_recommend
 }
 
 recipe__yandex_browser_beta_install() {
