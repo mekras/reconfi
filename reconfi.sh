@@ -50,14 +50,53 @@ isReloginNeeded=0
 isRebootNeeded=0
 
 ####################################################################################################
-## Утверждения.
+## Утверждения
+## ===========
 ##
 ## Эти функции предназначены для использования в файлах конфигурации системы. В будущем возможно
 ## преобразование файлов в форматах YAML, tree и т. п. в файлы shell, вызывающие эти функции.
 ##
 ## Сами функции не выполняют настройку системы, они только добавляют нужные действия в очереди
 ## (см. queues_*).
+##
+## Общие параметры
+## ---------------
+##
+## Эти параметры могут быть добавлены к любому утверждению. Применяются только если утверждение
+## не выполнено и были внесены изменения в систему.
+# - reboot=<recommend/require> — перезагрузка:
+#    - recommend — предложить (в конце);
+#    - require — потребовать для продолжения.
+# - session-restart=<recommend/require> — перезапуск сессии:
+#    - recommend — предложить (в конце);
+#    - require — потребовать для продолжения.
 ####################################################################################################
+
+##
+# Файл существует.
+#
+# @param $1 Путь к файлу.
+#
+assert__file_exists() {
+  path="${1:-}"
+  [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[file exists] Не указан путь к файлу."
+  shift
+
+  queues__enqueue files "cmd__file_exists \"${path}\"" "$@"
+}
+
+##
+# Файл не существует.
+#
+# @param $1 Путь к файлу.
+#
+assert__file_not_exists() {
+  path="${1:-}"
+  [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[file not exists] Не указан путь к файлу."
+  shift
+
+  queues__enqueue files "cmd__file_not_exists \"${path}\" \"$*\""
+}
 
 ##
 # Группа включает указанного пользователя.
@@ -68,33 +107,12 @@ isRebootNeeded=0
 assert__group_contains() {
   groupName="${1:-}"
   [ "${groupName}" != '' ] || error__fatal "${errApiArgumentMissing}" "[group contains] Не указано имя группы."
-  userName="${2:-}"
+  shift
+  userName="${1:-}"
   [ "${userName}" != '' ] || error__fatal "${errApiArgumentMissing}" "[group contains] Не указано имя пользователя."
+  shift
 
   queues__enqueue groups "cmd__group_contains ${groupName} ${userName}"
-}
-
-##
-# Файл существует.
-#
-# @param $1 Путь к файлу.
-#
-assert__file_exists() {
-  path="${1:-}"
-  [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[file exists] Не указан путь к файлу."
-  if [ -f "${path}" ]; then
-    print__ok "Файл ${path} существует."
-    return
-  fi
-
-  print__check_failed "Файл ${path} существует."
-  api__confirm 'Создать?' || return
-
-  if echo "${path}" | grep -E "^${HOME}" >/dev/null; then
-    touch "${path}"
-  else
-    sudo touch "${path}"
-  fi
 }
 
 ##
@@ -108,12 +126,16 @@ assert__file_exists() {
 assert__ini_set() {
   path="${1:-}"
   [ "${path}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан путь к файлу."
-  section="${2:-}"
+  shift
+  section="${1:-}"
   [ "${section}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан раздел."
-  key="${3:-}"
+  shift
+  key="${1:-}"
   [ "${key}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указан ключ."
-  value="${4:-}"
+  shift
+  value="${1:-}"
   [ "${value}" != '' ] || error__fatal "${errApiArgumentMissing}" "[ini set] Не указано значение."
+  shift
 
   # TODO Вынести в cmd_*
   # FIXME section не поддерживается.
@@ -140,10 +162,12 @@ assert__opensuse_repo_connected() {
 
   uri="${1:-}"
   [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
+  shift
   name="${1:-}"
   [ "${name}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указано имя репозитория."
+  shift
 
-  queues__enqueue repositories "cmd__opensuse_repo_add \"${uri}\" \"${name}\""
+  queues__enqueue repositories "cmd__opensuse_repo_add \"${uri}\" \"${name}\"" "$@"
 }
 
 ##
@@ -158,8 +182,9 @@ assert__opensuse_repo_disconnected() {
 
   uri="${1:-}"
   [ "${uri}" != '' ] || error__fatal "${errApiArgumentMissing}" "[openSUSE repo] Не указан URI репозитория."
+  shift
 
-  queues__enqueue repositories "cmd__opensuse_repo_remove \"${uri}\""
+  queues__enqueue repositories "cmd__opensuse_repo_remove \"${uri}\"" "$@"
 }
 
 ##
@@ -194,35 +219,141 @@ assert__packages_not_installed() {
 # Запрашивает у пользователя подтверждение действия.
 #
 # @param $1 Вопрос, который надо задать пользователю.
+# @param $2 Возможные варианты ответов: ynq
 #
 api__confirm() {
   question="${1}"
   shift
+  variants="${1:-ynq}"
 
-  printf "%s [Y/n/q]: " "${question}"
-  read -r answer
-  case ${answer} in
-    '')
-      true
-      ;;
-    [YyДд]*)
-      true
-      ;;
-    [NnНн]*)
-      false
-      ;;
-    *)
-      echo 'Сценарий прерван пользователем.'
-      exit "${errCancelledByUser}"
-      ;;
-  esac
+  variantYes=0
+  variantNo=0
+  variantQuit=0
+
+  while true; do
+    printf '%s (' "${question}"
+    case "${variants}" in
+      *y*)
+        printf 'y — да; '
+        variantYes=1
+        ;;
+    esac
+    case "${variants}" in
+      *n*)
+        printf 'n — нет; '
+        variantNo=1
+        ;;
+    esac
+    case "${variants}" in
+      *q*)
+        printf 'q — выход; '
+        variantQuit=1
+        ;;
+    esac
+    printf "\b\b): "
+    read -r answer
+    case ${answer} in
+      '')
+        return 0
+        ;;
+      [YyДд]*)
+        if [ "${variantYes}" -eq 1 ]; then
+          return 0
+        fi
+        ;;
+      [NnНн]*)
+        if [ "${variantNo}" -eq 1 ]; then
+          return 1
+        fi
+        ;;
+      *)
+        if [ "${variantQuit}" -eq 1 ]; then
+          echo 'Сценарий прерван пользователем.'
+          exit "${errCancelledByUser}"
+        fi
+        ;;
+    esac
+    echo 'Недопустимый ответ. Попробуйте ещё раз.'
+  done
 }
 
 ##
-# Требуется завершение сеанса.
+# Обрабатывает общие параметры.
 #
-api__session_restart_required() {
+api__process_common_parameters() {
+  for param in "$@"; do
+    case $param in
+      'reboot=recommend')
+        api__reboot_recommend
+        ;;
+      'reboot=require')
+        api__reboot_require
+        ;;
+      'session-restart=recommend')
+        api__session_exit_recommend
+        ;;
+      'session-restart=require')
+        api__session_exit_require
+        ;;
+    esac
+  done
+}
+
+##
+# Перезагрузить систему.
+#
+api__reboot() {
+  sudo reboot
+}
+
+##
+# Рекомендуется перезагрузка.
+#
+api__reboot_recommend() {
+  isRebootNeeded=1
+}
+
+##
+# Необходима перезагрузка.
+#
+api__reboot_force() {
+  # TODO Надо записывать признак куда-то в файл, чтобы даже при перезапуске reconfi выдавался
+  #      запрос на перезагрузку.
+  echo
+  echo 'Для продолжения необходимо перезагрузить систему.'
+  echo
+  if api__confirm 'Перезагрузить?' yq; then
+    api__reboot
+  fi
+}
+
+##
+# Завершение сеанса.
+#
+api__session_exit() {
+  # TODO Добавить поддержку других сред.
+  qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
+}
+
+##
+# Рекомендуется завершение сеанса.
+#
+api__session_exit_recommend() {
   isReloginNeeded=1
+}
+
+##
+# Необходимо завершение сеанса.
+#
+api__session_exit_require() {
+  # TODO Надо записывать признак куда-то в файл, чтобы даже при перезапуске reconfi выдавался
+  #      запрос на завершение.
+  echo
+  echo 'Для продолжения необходимо завершить сеанс текущего пользователя.'
+  echo
+  if api__confirm 'Завершить?' yq; then
+    api__session_exit
+  fi
 }
 
 ####################################################################################################
@@ -232,17 +363,67 @@ api__session_restart_required() {
 ## выполнения. Именно эти функции должны вносить изменения в систему.
 ####################################################################################################
 
+##
+# Создаёт файл.
+#
+# @param $1 Путь к файлу.
+#
+cmd__file_exists() {
+  path="${1}"
+  shift
+
+  if [ -f "${path}" ]; then
+    print__ok "Файл ${path} существует."
+    return
+  fi
+
+  print__check_failed "Файл ${path} существует."
+  api__confirm 'Создать?' || return
+
+  if echo "${path}" | grep -E "^${HOME}" >/dev/null; then
+    touch "${path}"
+  else
+    sudo touch "${path}"
+  fi
+  api__process_common_parameters "$@"
+}
+
+##
+# Удаляет файл.
+#
+# @param $1 Путь к файлу.
+#
+cmd__file_not_exists() {
+  path="${1}"
+  shift
+
+  if [ ! -f "${path}" ]; then
+    print__ok "Файл ${path} не существует."
+    return
+  fi
+
+  print__check_failed "Файл ${path} существует."
+  api__confirm 'Удалить?' || return
+
+  sudo unlink "${path}"
+
+  api__process_common_parameters "$@"
+}
+
 cmd__group_contains() {
-  groupName=$1
-  userName=$2
+  groupName="${1}"
+  shift
+  userName="${1}"
+  shift
   if id -nG "${userName}" | grep "${groupName}" >/dev/null; then
     print__ok "Пользователь ${userName} входит в группу ${groupName}."
   else
-    print_check_failed
-    api__confirm 'Добавить пользователя в группу?'
+    print__check_failed "Пользователь ${userName} не входит в группу ${groupName}."
+    api__confirm 'Добавить?'
     su -c "usermod --append --groups=${groupName} ${userName}"
     print_fixed
-    api__session_restart_required
+    api__session_exit_recommend
+    api__process_common_parameters "$@"
   fi
 }
 
@@ -254,7 +435,9 @@ cmd__group_contains() {
 #
 cmd__opensuse_repo_add() {
   uri="${1}"
-  name="${2}"
+  shift
+  name="${1}"
+  shift
 
   if sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
     print__ok "Репозиторий \"${uri}\" подключён."
@@ -262,8 +445,9 @@ cmd__opensuse_repo_add() {
     print__check_failed "Репозиторий \"${uri}\" не подключён."
     if api__confirm 'Подключить?'; then
       #sudo zypper removerepo "${name}"
-      sudo zypper addrepo --name="${name}" --refresh "${uri}" "${name}"
+      sudo zypper addrepo --name "${name}" --refresh "${uri}" "${name}"
       sudo zypper --gpg-auto-import-keys refresh
+      api__process_common_parameters "$@"
     fi
   fi
 }
@@ -275,6 +459,7 @@ cmd__opensuse_repo_add() {
 #
 cmd__opensuse_repo_remove() {
   uri="${1}"
+  shift
 
   if ! sudo zypper repos "${uri}" >/dev/null 2>/dev/null; then
     print__ok "Репозиторий \"${uri}\" не подключён."
@@ -284,6 +469,7 @@ cmd__opensuse_repo_remove() {
   print__check_failed "Репозиторий \"${uri}\" подключён."
   if api__confirm 'Удалить?'; then
     sudo zypper removerepo "${uri}"
+    api__process_common_parameters "$@"
   fi
 }
 
@@ -300,6 +486,7 @@ cmd__opensuse_repo_remove() {
 # - recipe__$1_configure — настраивает пакет, вызывается всегда;
 cmd__package_install() {
   pkg="${1}"
+  shift
 
   if is_package_installed "${pkg}"; then
     print__ok "${pkg} установлен."
@@ -319,14 +506,19 @@ cmd__package_install() {
   fi
 
   recipe__run "${pkg}" after_install || true
+
+  api__process_common_parameters "$@"
 }
 
 cmd__package_remove() {
   pkg="${1}"
+  shift
+
   if is_package_installed "${pkg}"; then
     print__check_failed "Установлен лишний пакет ${pkg}"
     if api__confirm 'Удалить?'; then
       ${zypper_remove} "${pkg}"
+      api__process_common_parameters "$@"
     fi
   else
     print__ok "${pkg} отсутствует."
@@ -347,17 +539,6 @@ cmd__package_remove() {
 #    fi
 #}
 
-checkNeededActions() {
-  if [ ${isRebootNeeded} -eq 1 ]; then
-    echo
-    printf "Для применения сделанных изменений надо перезагрузить систему."
-    echo
-    printf "Нажмите Enter для перезагрузки."
-    read -r
-    sudo reboot
-  fi
-}
-
 ##
 # Выполняет рецепт.
 #
@@ -372,21 +553,6 @@ recipe__run() {
     $recipe
   else
     false
-  fi
-}
-
-##
-# Действия с текущей сессией.
-#
-session__check_for_actions() {
-  if [ ${isReloginNeeded} -eq 1 ]; then
-    echo
-    echo 'Для применения сделанных изменений надо заново войти в систему.'
-    echo
-    if api__confirm 'Завершить сеанс?'; then
-      # TODO Добавить поддержку других сред.
-      qdbus org.kde.ksmserver /KSMServer logout 0 0 0 2>/dev/null || qdbus-qt5 org.kde.ksmserver /KSMServer logout 0 0 0
-    fi
   fi
 }
 
@@ -580,7 +746,7 @@ print_fixed() {
 ####################################################################################################
 
 recipe__snapd_after_install() {
-  api__session_restart_required
+  api__session_exit_recommend
   sudo systemctl enable snapd.apparmor.service
   sudo systemctl enable snapd
   sudo systemctl start snapd
@@ -668,4 +834,22 @@ queues__run groups
 queues__run repositories
 queues__run remove
 queues__run install
-session__check_for_actions
+queues__run files
+
+if [ ${isRebootNeeded} -eq 1 ]; then
+  echo
+  echo 'Для применения сделанных изменений надо перезагрузить систему.'
+  echo
+  if api__confirm 'Перезагрузить?' yn; then
+    api__reboot
+  fi
+fi
+
+if [ ${isReloginNeeded} -eq 1 ]; then
+  echo
+  echo 'Для применения сделанных изменений надо заново войти в систему.'
+  echo
+  if api__confirm 'Завершить сеанс?' yn; then
+    api__session_exit
+  fi
+fi
