@@ -787,6 +787,14 @@ api__confirm 'Начать проверку и настройку системы
 
 queuesDir="$(mktemp --tmpdir -d RCFI.XXXX)"
 
+echo 'Для настройки системы нужны права суперпользователя.'
+if [ "$(sudo whoami)" = "root" ]; then
+  echo "Права получены."
+else
+  echo "Не удалось получить права суперпользователя."
+  exit "${errInvalidSystemConfiguration}"
+fi
+
 # shellcheck disable=SC1090
 . "${confFile}"
 
@@ -821,14 +829,6 @@ queuesDir="$(mktemp --tmpdir -d RCFI.XXXX)"
 #    echo -e "\n127.0.0.1\t$(hostname)" | sudo tee --append /etc/hosts >/dev/null
 #    print_fixed
 #fi
-
-echo 'Для настройки системы нужны права суперпользователя.'
-if [ "$(sudo whoami)" = "root" ]; then
-  echo "Права получены."
-else
-  echo "Не удалось получить права суперпользователя."
-  exit "${errInvalidSystemConfiguration}"
-fi
 
 queues__run groups
 queues__run repositories
